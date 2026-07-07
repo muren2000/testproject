@@ -7,8 +7,8 @@ cd "$(dirname "$0")/.."
 
 python3 -m venv .build-venv
 source .build-venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt pyinstaller
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt pyinstaller
 
 # GUI-приложение (.app, можно перетащить в /Applications)
 pyinstaller --noconfirm --windowed --name "PDF Compress" \

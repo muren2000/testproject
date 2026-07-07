@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import queue
+import subprocess
 import sys
 import threading
 
@@ -34,8 +35,8 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"PDF Compress {__version__}")
-        self.geometry("720x520")
-        self.minsize(640, 460)
+        self.geometry("780x520")
+        self.minsize(700, 460)
 
         self.rows: dict[str, str] = {}  # путь -> id строки таблицы
         self.preset_var = tk.StringVar(value="ebook")
@@ -57,16 +58,19 @@ class App(tk.Tk):
             top, text="Результат сохраняется рядом с исходником: имя.compressed.*"
         ).pack(side="left", padx=8)
 
-        cols = ("size", "result", "saved")
+        cols = ("size", "result", "saved", "reveal")
         self.tree = ttk.Treeview(self, columns=cols, show="tree headings", height=8)
         self.tree.heading("#0", text="Файл")
         self.tree.heading("size", text="Было")
         self.tree.heading("result", text="Стало")
         self.tree.heading("saved", text="Экономия")
-        self.tree.column("#0", width=330, anchor="w")
-        self.tree.column("size", width=90, anchor="e")
-        self.tree.column("result", width=110, anchor="e")
-        self.tree.column("saved", width=90, anchor="e")
+        self.tree.heading("reveal", text="")
+        self.tree.column("#0", width=250, anchor="w")
+        self.tree.column("size", width=80, anchor="e")
+        self.tree.column("result", width=100, anchor="e")
+        self.tree.column("saved", width=80, anchor="e")
+        self.tree.column("reveal", width=130, anchor="center", stretch=False)
+        self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.pack(fill="both", expand=True, **pad)
 
         presets = ttk.LabelFrame(self, text="Уровень сжатия")
@@ -115,9 +119,40 @@ class App(tk.Tk):
             return
         size = human_size(os.path.getsize(path)) if os.path.exists(path) else "?"
         item = self.tree.insert(
-            "", "end", text=os.path.basename(path), values=(size, "", "")
+            "", "end", text=os.path.basename(path),
+            values=(size, "", "", "Показать в папке"),
         )
         self.rows[path] = item
+
+    @staticmethod
+    def _output_for(path: str) -> str:
+        base, ext = os.path.splitext(path)
+        return f"{base}.compressed{ext or '.pdf'}"
+
+    def _on_tree_click(self, event) -> None:
+        if self.tree.identify("region", event.x, event.y) != "cell":
+            return
+        if self.tree.identify_column(event.x) != "#4":  # колонка «Показать в папке»
+            return
+        item = self.tree.identify_row(event.y)
+        for path, it in self.rows.items():
+            if it == item:
+                out = self._output_for(path)
+                self._reveal(out if os.path.exists(out) else path)
+                break
+
+    @staticmethod
+    def _reveal(path: str) -> None:
+        """Открывает системный файловый менеджер с выделенным файлом."""
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", "-R", path])
+            elif os.name == "nt":
+                subprocess.Popen(["explorer", f"/select,{os.path.normpath(path)}"])
+            else:
+                subprocess.Popen(["xdg-open", os.path.dirname(path) or "."])
+        except OSError:
+            pass
 
     def _clear_files(self) -> None:
         if self.worker and self.worker.is_alive():

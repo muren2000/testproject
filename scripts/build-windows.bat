@@ -7,8 +7,8 @@ cd /d "%~dp0\.."
 
 python -m venv .build-venv
 call .build-venv\Scripts\activate.bat
-pip install --upgrade pip
-pip install -r requirements.txt pyinstaller
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt pyinstaller
 
 rem GUI-приложение (одним .exe, без окна консоли)
 pyinstaller --noconfirm --onefile --windowed --name "PDF Compress" ^
