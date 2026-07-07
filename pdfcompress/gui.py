@@ -22,6 +22,12 @@ import pikepdf
 
 from . import __version__
 from .core import PRESETS, compress_pdf, human_size
+from .office import (
+    LegacyOfficeError,
+    compress_office,
+    is_legacy_office_file,
+    is_office_file,
+)
 
 
 class App(tk.Tk):
@@ -45,10 +51,10 @@ class App(tk.Tk):
 
         top = ttk.Frame(self)
         top.pack(fill="x", **pad)
-        ttk.Button(top, text="Добавить PDF…", command=self._add_files).pack(side="left")
+        ttk.Button(top, text="Добавить файлы…", command=self._add_files).pack(side="left")
         ttk.Button(top, text="Очистить", command=self._clear_files).pack(side="left", padx=8)
         ttk.Label(
-            top, text="Результат сохраняется рядом с исходником: имя.compressed.pdf"
+            top, text="Результат сохраняется рядом с исходником: имя.compressed.*"
         ).pack(side="left", padx=8)
 
         cols = ("size", "result", "saved")
@@ -87,12 +93,19 @@ class App(tk.Tk):
         self.progress = ttk.Progressbar(bottom, mode="determinate")
         self.progress.pack(side="left", fill="x", expand=True, padx=10)
 
-        self.status = ttk.Label(self, text="Добавьте PDF-файлы и нажмите «Сжать».")
+        self.status = ttk.Label(self, text="Добавьте файлы (PDF, PPTX, DOCX, XLSX) и нажмите «Сжать».")
         self.status.pack(fill="x", padx=12, pady=(0, 10))
 
     def _add_files(self) -> None:
         paths = filedialog.askopenfilenames(
-            title="Выберите PDF-файлы", filetypes=[("PDF", "*.pdf"), ("Все файлы", "*.*")]
+            title="Выберите файлы",
+            filetypes=[
+                ("PDF и презентации", "*.pdf *.pptx *.docx *.xlsx"),
+                ("PDF", "*.pdf"),
+                ("PowerPoint", "*.pptx"),
+                ("Word / Excel", "*.docx *.xlsx"),
+                ("Все файлы", "*.*"),
+            ],
         )
         for p in paths:
             self.add_file(p)
@@ -111,12 +124,12 @@ class App(tk.Tk):
             return
         self.rows.clear()
         self.tree.delete(*self.tree.get_children())
-        self.status.config(text="Добавьте PDF-файлы и нажмите «Сжать».")
+        self.status.config(text="Добавьте файлы (PDF, PPTX, DOCX, XLSX) и нажмите «Сжать».")
         self.progress.config(value=0)
 
     def _start(self) -> None:
         if not self.rows:
-            self.status.config(text="Сначала добавьте хотя бы один PDF-файл.")
+            self.status.config(text="Сначала добавьте хотя бы один файл.")
             return
         if self.worker and self.worker.is_alive():
             return
@@ -138,11 +151,17 @@ class App(tk.Tk):
             base, ext = os.path.splitext(path)
             out = f"{base}.compressed{ext or '.pdf'}"
             try:
-                r = compress_pdf(path, out, preset=preset, strip_metadata=not keep_meta)
+                if is_office_file(path) or is_legacy_office_file(path):
+                    r = compress_office(path, out, preset=preset)
+                else:
+                    r = compress_pdf(path, out, preset=preset, strip_metadata=not keep_meta)
                 self.msg_queue.put(
                     ("row", (item, human_size(r.output_bytes), f"−{r.saved_percent:.0f}%"))
                 )
                 done += 1
+            except LegacyOfficeError:
+                self.msg_queue.put(("row", (item, "пересохраните как .pptx", "—")))
+                failed += 1
             except pikepdf.PasswordError:
                 self.msg_queue.put(("row", (item, "зашифрован", "—")))
                 failed += 1
@@ -153,7 +172,7 @@ class App(tk.Tk):
         summary = f"Готово: {done} из {len(jobs)}."
         if failed:
             summary += f" С ошибкой: {failed}."
-        summary += " Файлы *.compressed.pdf лежат рядом с исходниками."
+        summary += " Файлы *.compressed.* лежат рядом с исходниками."
         self.msg_queue.put(("done", summary))
 
     def _poll_queue(self) -> None:

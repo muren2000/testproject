@@ -6,10 +6,18 @@ import argparse
 import os
 import sys
 
+import zipfile
+
 import pikepdf
 
 from . import __version__
 from .core import PRESETS, compress_pdf, human_size
+from .office import (
+    LegacyOfficeError,
+    compress_office,
+    is_legacy_office_file,
+    is_office_file,
+)
 
 
 def _default_output(input_path: str) -> str:
@@ -20,11 +28,15 @@ def _default_output(input_path: str) -> str:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="pdfcompress",
-        description="Офлайн-сжатие PDF-файлов (macOS / Windows / Linux).",
+        description="Офлайн-сжатие PDF и офисных файлов (.pptx/.docx/.xlsx) "
+        "на macOS / Windows / Linux.",
         epilog="Пресеты: "
         + "; ".join(f"{k} — {v.description}" for k, v in PRESETS.items()),
     )
-    p.add_argument("inputs", nargs="+", metavar="INPUT.pdf", help="исходные PDF-файлы")
+    p.add_argument(
+        "inputs", nargs="+", metavar="INPUT",
+        help="исходные файлы: .pdf, .pptx, .docx, .xlsx",
+    )
     p.add_argument(
         "-o",
         "--output",
@@ -68,13 +80,20 @@ def main(argv: list[str] | None = None) -> int:
 
         output_path = args.output or _default_output(input_path)
         try:
-            result = compress_pdf(
-                input_path,
-                output_path,
-                preset=preset,
-                strip_metadata=not args.keep_metadata,
-                password=args.password,
-            )
+            if is_office_file(input_path) or is_legacy_office_file(input_path):
+                result = compress_office(input_path, output_path, preset=preset)
+            else:
+                result = compress_pdf(
+                    input_path,
+                    output_path,
+                    preset=preset,
+                    strip_metadata=not args.keep_metadata,
+                    password=args.password,
+                )
+        except (LegacyOfficeError, zipfile.BadZipFile) as e:
+            print(f"Ошибка: {input_path}: {e}", file=sys.stderr)
+            failures += 1
+            continue
         except pikepdf.PasswordError:
             print(
                 f"Ошибка: {input_path} зашифрован — укажите пароль через --password.",
