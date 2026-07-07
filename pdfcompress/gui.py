@@ -1,4 +1,4 @@
-"""Графический интерфейс на tkinter (входит в стандартный Python на macOS и Windows)."""
+"""Простое нативное окно на tkinter (входит в стандартный Python на macOS и Windows)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import threading
 
 try:
     import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
+    from tkinter import filedialog, ttk
 except ImportError:  # pragma: no cover
     print(
         "Не найден tkinter. На Windows/macOS он входит в установщик Python с python.org;\n"
@@ -27,11 +27,11 @@ from .core import PRESETS, compress_pdf, human_size
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title(f"PDF Compress {__version__} — офлайн-сжатие PDF")
-        self.geometry("640x480")
-        self.minsize(560, 420)
+        self.title(f"PDF Compress {__version__}")
+        self.geometry("720x520")
+        self.minsize(640, 460)
 
-        self.files: list[str] = []
+        self.rows: dict[str, str] = {}  # путь -> id строки таблицы
         self.preset_var = tk.StringVar(value="ebook")
         self.keep_meta_var = tk.BooleanVar(value=False)
         self.msg_queue: queue.Queue = queue.Queue()
@@ -41,17 +41,27 @@ class App(tk.Tk):
         self.after(100, self._poll_queue)
 
     def _build_ui(self) -> None:
-        pad = {"padx": 10, "pady": 5}
+        pad = {"padx": 12, "pady": 6}
 
         top = ttk.Frame(self)
         top.pack(fill="x", **pad)
         ttk.Button(top, text="Добавить PDF…", command=self._add_files).pack(side="left")
-        ttk.Button(top, text="Очистить список", command=self._clear_files).pack(
-            side="left", padx=8
-        )
+        ttk.Button(top, text="Очистить", command=self._clear_files).pack(side="left", padx=8)
+        ttk.Label(
+            top, text="Результат сохраняется рядом с исходником: имя.compressed.pdf"
+        ).pack(side="left", padx=8)
 
-        self.listbox = tk.Listbox(self, height=8)
-        self.listbox.pack(fill="both", expand=True, **pad)
+        cols = ("size", "result", "saved")
+        self.tree = ttk.Treeview(self, columns=cols, show="tree headings", height=8)
+        self.tree.heading("#0", text="Файл")
+        self.tree.heading("size", text="Было")
+        self.tree.heading("result", text="Стало")
+        self.tree.heading("saved", text="Экономия")
+        self.tree.column("#0", width=330, anchor="w")
+        self.tree.column("size", width=90, anchor="e")
+        self.tree.column("result", width=110, anchor="e")
+        self.tree.column("saved", width=90, anchor="e")
+        self.tree.pack(fill="both", expand=True, **pad)
 
         presets = ttk.LabelFrame(self, text="Уровень сжатия")
         presets.pack(fill="x", **pad)
@@ -64,66 +74,87 @@ class App(tk.Tk):
                 variable=self.preset_var,
             ).pack(anchor="w", padx=8, pady=2)
 
+        opts = ttk.Frame(self)
+        opts.pack(fill="x", **pad)
         ttk.Checkbutton(
-            self, text="Сохранить метаданные документа", variable=self.keep_meta_var
-        ).pack(anchor="w", **pad)
+            opts, text="Сохранить метаданные документа", variable=self.keep_meta_var
+        ).pack(side="left")
 
-        self.progress = ttk.Progressbar(self, mode="determinate")
-        self.progress.pack(fill="x", **pad)
+        bottom = ttk.Frame(self)
+        bottom.pack(fill="x", **pad)
+        self.compress_btn = ttk.Button(bottom, text="Сжать", command=self._start)
+        self.compress_btn.pack(side="left")
+        self.progress = ttk.Progressbar(bottom, mode="determinate")
+        self.progress.pack(side="left", fill="x", expand=True, padx=10)
 
         self.status = ttk.Label(self, text="Добавьте PDF-файлы и нажмите «Сжать».")
-        self.status.pack(fill="x", **pad)
-
-        self.compress_btn = ttk.Button(self, text="Сжать", command=self._start)
-        self.compress_btn.pack(pady=10)
+        self.status.pack(fill="x", padx=12, pady=(0, 10))
 
     def _add_files(self) -> None:
         paths = filedialog.askopenfilenames(
             title="Выберите PDF-файлы", filetypes=[("PDF", "*.pdf"), ("Все файлы", "*.*")]
         )
         for p in paths:
-            if p not in self.files:
-                self.files.append(p)
-                self.listbox.insert("end", p)
+            self.add_file(p)
+
+    def add_file(self, path: str) -> None:
+        if path in self.rows:
+            return
+        size = human_size(os.path.getsize(path)) if os.path.exists(path) else "?"
+        item = self.tree.insert(
+            "", "end", text=os.path.basename(path), values=(size, "", "")
+        )
+        self.rows[path] = item
 
     def _clear_files(self) -> None:
-        self.files.clear()
-        self.listbox.delete(0, "end")
+        if self.worker and self.worker.is_alive():
+            return
+        self.rows.clear()
+        self.tree.delete(*self.tree.get_children())
+        self.status.config(text="Добавьте PDF-файлы и нажмите «Сжать».")
+        self.progress.config(value=0)
 
     def _start(self) -> None:
-        if not self.files:
-            messagebox.showinfo("PDF Compress", "Сначала добавьте хотя бы один PDF-файл.")
+        if not self.rows:
+            self.status.config(text="Сначала добавьте хотя бы один PDF-файл.")
             return
         if self.worker and self.worker.is_alive():
             return
         self.compress_btn.config(state="disabled")
-        self.progress.config(value=0, maximum=len(self.files))
-        files = list(self.files)
+        self.progress.config(value=0, maximum=len(self.rows))
+        jobs = dict(self.rows)
         preset = PRESETS[self.preset_var.get()]
         keep_meta = self.keep_meta_var.get()
         self.worker = threading.Thread(
-            target=self._run, args=(files, preset, keep_meta), daemon=True
+            target=self._run, args=(jobs, preset, keep_meta), daemon=True
         )
         self.worker.start()
 
-    def _run(self, files: list[str], preset, keep_meta: bool) -> None:
-        lines: list[str] = []
-        for i, path in enumerate(files, 1):
-            self.msg_queue.put(("status", f"Сжатие {i}/{len(files)}: {os.path.basename(path)}…"))
+    def _run(self, jobs: dict[str, str], preset, keep_meta: bool) -> None:
+        done = failed = 0
+        for i, (path, item) in enumerate(jobs.items(), 1):
+            name = os.path.basename(path)
+            self.msg_queue.put(("status", f"Сжатие {i}/{len(jobs)}: {name}…"))
             base, ext = os.path.splitext(path)
             out = f"{base}.compressed{ext or '.pdf'}"
             try:
                 r = compress_pdf(path, out, preset=preset, strip_metadata=not keep_meta)
-                lines.append(
-                    f"{os.path.basename(path)}: {human_size(r.input_bytes)} -> "
-                    f"{human_size(r.output_bytes)} (-{r.saved_percent:.0f}%)"
+                self.msg_queue.put(
+                    ("row", (item, human_size(r.output_bytes), f"−{r.saved_percent:.0f}%"))
                 )
+                done += 1
             except pikepdf.PasswordError:
-                lines.append(f"{os.path.basename(path)}: пропущен (зашифрован паролем)")
-            except Exception as e:
-                lines.append(f"{os.path.basename(path)}: ошибка — {e}")
+                self.msg_queue.put(("row", (item, "зашифрован", "—")))
+                failed += 1
+            except Exception:
+                self.msg_queue.put(("row", (item, "ошибка", "—")))
+                failed += 1
             self.msg_queue.put(("progress", i))
-        self.msg_queue.put(("done", "\n".join(lines)))
+        summary = f"Готово: {done} из {len(jobs)}."
+        if failed:
+            summary += f" С ошибкой: {failed}."
+        summary += " Файлы *.compressed.pdf лежат рядом с исходниками."
+        self.msg_queue.put(("done", summary))
 
     def _poll_queue(self) -> None:
         try:
@@ -133,10 +164,14 @@ class App(tk.Tk):
                     self.status.config(text=payload)
                 elif kind == "progress":
                     self.progress.config(value=payload)
+                elif kind == "row":
+                    item, result, saved = payload
+                    if self.tree.exists(item):
+                        self.tree.set(item, "result", result)
+                        self.tree.set(item, "saved", saved)
                 elif kind == "done":
                     self.compress_btn.config(state="normal")
-                    self.status.config(text="Готово. Файлы *.compressed.pdf лежат рядом с исходниками.")
-                    messagebox.showinfo("PDF Compress — готово", payload)
+                    self.status.config(text=payload)
         except queue.Empty:
             pass
         self.after(100, self._poll_queue)
