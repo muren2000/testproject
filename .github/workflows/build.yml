@@ -85,8 +85,8 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag || github.ref_name }}
+          # в релиз идут только приложения с окном — по одному файлу на платформу;
+          # консольные версии остаются в артефактах сборки
           files: |
             dist/PDF-Compress-macOS-arm64.zip
-            dist/pdfcompress-macos-arm64
             dist/PDF Compress.exe
-            dist/pdfcompress.exe
