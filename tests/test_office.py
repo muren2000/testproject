@@ -39,6 +39,7 @@ def _make_pptx(path: str) -> dict:
         "ppt/media/image1.jpg": _jpeg_bytes(),
         "ppt/media/image2.png": _png_bytes(),
         "ppt/media/image3.gif": b"GIF89a" + b"\x00" * 5000,  # не перекодируется
+        "ppt/media/movie1.mp4": os.urandom(1_000_000),  # копируется потоково
     }
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         for name, data in entries.items():
@@ -73,6 +74,10 @@ class OfficeTest(unittest.TestCase):
             png = Image.open(io.BytesIO(z.read("ppt/media/image2.png")))
             self.assertEqual(png.format, "PNG")
             self.assertEqual(png.mode, "RGBA")  # прозрачность не потеряна
+            # видео скопировано байт-в-байт (потоковый путь)
+            self.assertEqual(
+                z.read("ppt/media/movie1.mp4"), self.entries["ppt/media/movie1.mp4"]
+            )
 
     def test_lossless_keeps_media_bytes(self):
         compress_office(self.src, self.dst, preset=PRESETS["lossless"])

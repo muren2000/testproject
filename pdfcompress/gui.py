@@ -98,7 +98,18 @@ class App(tk.Tk):
         self.progress.pack(side="left", fill="x", expand=True, padx=10)
 
         self.status = ttk.Label(self, text="Добавьте файлы (PDF, PPTX, DOCX, XLSX) и нажмите «Сжать».")
-        self.status.pack(fill="x", padx=12, pady=(0, 10))
+        self.status.pack(fill="x", padx=12)
+
+        limits = ttk.Label(
+            self,
+            text="Ограничения: старые .ppt/.doc/.xls не поддерживаются · видео в презентациях "
+            "не сжимается · эл. подпись PDF теряется · картинки крупнее 500 Мп пропускаются",
+            font=("", 10),
+            foreground="gray",
+            wraplength=740,
+            justify="left",
+        )
+        limits.pack(fill="x", padx=12, pady=(2, 10))
 
     def _add_files(self) -> None:
         paths = filedialog.askopenfilenames(

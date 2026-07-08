@@ -1,6 +1,6 @@
 """pdfcompress — офлайн-сжатие PDF и офисных файлов для macOS и Windows."""
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 from .core import CompressionResult, Preset, PRESETS, compress_pdf
 from .office import LegacyOfficeError, compress_office

@@ -29,6 +29,10 @@ MEDIA_DIRS = ("ppt/media/", "word/media/", "xl/media/")
 OFFICE_EXTS = {".pptx", ".ppsx", ".potx", ".docx", ".xlsx"}
 LEGACY_EXTS = {".ppt", ".pps", ".pot", ".doc", ".xls"}
 
+# Медиа с такими расширениями считаем изображениями (учитываются в статистике);
+# перекодируются из них только png/jpg/jpeg — см. _recompress_media.
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp"}
+
 
 class LegacyOfficeError(ValueError):
     """Старый бинарный формат Office (до 2007), перепаковка невозможна."""
@@ -86,29 +90,40 @@ def compress_office(
     images_total = 0
     images_recompressed = 0
 
+    def _is_image_media(name: str) -> bool:
+        return (
+            name.startswith(MEDIA_DIRS)
+            and os.path.splitext(name)[1].lower() in IMAGE_EXTS
+        )
+
     with zipfile.ZipFile(input_path) as zin:
         entries = zin.infolist()
-        media_names = [
-            e.filename
-            for e in entries
-            if e.filename.startswith(MEDIA_DIRS)
-        ]
+        n_images = sum(1 for e in entries if _is_image_media(e.filename))
         with zipfile.ZipFile(
             output_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
         ) as zout:
             done = 0
             for entry in entries:
-                data = zin.read(entry.filename)
-                if preset.jpeg_quality > 0 and entry.filename in media_names:
+                if preset.jpeg_quality > 0 and _is_image_media(entry.filename):
+                    # изображения ограничены по размеру — читаем в память
                     images_total += 1
+                    data = zin.read(entry.filename)
                     new = _recompress_media(entry.filename, data, preset)
                     if new is not None:
                         data = new
                         images_recompressed += 1
+                    zout.writestr(entry.filename, data)
                     done += 1
                     if progress:
-                        progress(done, len(media_names))
-                zout.writestr(entry.filename, data)
+                        progress(done, n_images)
+                else:
+                    # всё остальное (XML, шрифты, видео любого размера) —
+                    # потоковое копирование, память не зависит от размера
+                    zi = zipfile.ZipInfo(entry.filename, date_time=entry.date_time)
+                    zi.compress_type = zipfile.ZIP_DEFLATED
+                    zi.external_attr = entry.external_attr
+                    with zin.open(entry) as src, zout.open(zi, mode="w") as dst:
+                        shutil.copyfileobj(src, dst, 1 << 20)
 
     output_bytes = os.path.getsize(output_path)
     if output_bytes >= input_bytes:

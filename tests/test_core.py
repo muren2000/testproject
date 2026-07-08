@@ -124,6 +124,20 @@ class CompressTest(unittest.TestCase):
             with pdf.open_metadata() as meta:
                 self.assertEqual(meta.get("dc:title"), "Секретный документ")
 
+    def test_oversized_image_skipped(self):
+        # страховка от декомпрессионных бомб: слишком большие картинки не трогаем
+        import pdfcompress.core as core
+
+        _make_test_pdf(self.src)
+        orig_limit = core.MAX_IMAGE_PIXELS
+        core.MAX_IMAGE_PIXELS = 1000  # тестовая картинка 1600x2000 больше лимита
+        try:
+            r = compress_pdf(self.src, self.dst, preset=PRESETS["ebook"])
+        finally:
+            core.MAX_IMAGE_PIXELS = orig_limit
+        self.assertEqual(r.images_recompressed, 0)
+        self.assertEqual(_verify_decodable(self.dst), 1)
+
     def test_encrypted_requires_password(self):
         _make_test_pdf(self.src)
         enc = os.path.join(self.tmp.name, "enc.pdf")

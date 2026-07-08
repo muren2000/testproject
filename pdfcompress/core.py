@@ -24,6 +24,10 @@ from PIL import Image
 # Изображения меньше этого размера (в байтах) не трогаем — выигрыш ничтожен.
 MIN_IMAGE_BYTES = 4096
 
+# Страховка от «декомпрессионных бомб»: изображения крупнее этого числа
+# пикселей не декодируем (легальные сканы A4 600 dpi — это всего ~35 Мп).
+MAX_IMAGE_PIXELS = 500_000_000
+
 # Фильтры, которые уже дают компактный результат для 1-битных сканов.
 SKIP_FILTERS = {"/CCITTFaxDecode", "/JBIG2Decode", "/JPXDecode"}
 
@@ -108,6 +112,9 @@ def _recompress_image(
         if "/ImageMask" in obj and bool(obj.ImageMask):
             return False
         if _filters_of(obj) & SKIP_FILTERS:
+            return False
+
+        if int(obj.Width) * int(obj.Height) > MAX_IMAGE_PIXELS:
             return False
 
         old_size = len(obj.read_raw_bytes())
