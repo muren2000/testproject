@@ -5,6 +5,11 @@ on:
     branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Создать релиз с этим тегом (например v1.2.0); пусто — только сборка"
+        required: false
+        default: ""
 
 jobs:
   test:
@@ -67,7 +72,7 @@ jobs:
 
   release:
     name: Attach binaries to release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     permissions:
@@ -79,6 +84,7 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: |
             dist/PDF-Compress-macOS-arm64.zip
             dist/pdfcompress-macos-arm64
