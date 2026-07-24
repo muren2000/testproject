@@ -1,0 +1,22 @@
+[Unit]
+Description=Telegram <-> MAX bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bridge
+WorkingDirectory=/opt/tg-max-bridge
+ExecStart=/opt/tg-max-bridge/.venv/bin/python -m bridge
+Restart=always
+RestartSec=5
+
+# базовая изоляция процесса
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/tg-max-bridge
+
+[Install]
+WantedBy=multi-user.target
